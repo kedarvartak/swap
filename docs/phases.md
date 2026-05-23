@@ -204,55 +204,6 @@ SWAP is built in 4 phases. Each phase ships something runnable — no phase ends
 
 ---
 
-## Phase 4 — Hardening + Additional Languages
-**Goal:** Production-grade reliability. Python and Go support. README ready for public.
-**Outcome:** Publishable open-source repository.
-
-### Tasks
-
-#### 4.1 Server Crash Recovery
-- [ ] Persist claim state to `swap-state.json` every 30 seconds (atomic write)
-- [ ] On server restart: load state, mark agents `disconnected`, wait for reconnections
-- [ ] Claims from disconnected agents expire after 60s post-restart
-- [ ] Log all claim/release/conflict events to append-only `swap.log`
-
-#### 4.2 WebSocket Reconnection (MCP Client)
-- [ ] Detect WebSocket close in MCP client
-- [ ] Exponential backoff retry: 1s, 2s, 4s, 8s, 16s, max 30s
-- [ ] On reconnect: re-register with same agent ID + task description
-- [ ] Server restores claims for reconnecting agent from persisted state
-
-#### 4.3 Python Language Support
-- [ ] Install `tree-sitter-python`
-- [ ] `parser/languages/python.ts` — queries for functions (`def`), classes, methods, module-level variables
-- [ ] Signature extraction: parse type annotations from Python AST nodes
-- [ ] Dependency extraction: function calls, `import` statements, `from X import Y`
-- [ ] Unit tests: 3 Python fixture files
-
-#### 4.4 Go Language Support
-- [ ] Install `tree-sitter-go`
-- [ ] `parser/languages/go.ts` — queries for functions, methods, structs, interfaces
-- [ ] Signature extraction: Go function signatures
-- [ ] Partial dependency extraction: function calls (type references harder in Go, defer to Phase 4 stretch)
-
-#### 4.5 README and Documentation
-- [ ] `README.md`: what SWAP is, why it exists, 5-minute quickstart
-- [ ] Architecture diagram (ASCII, matches design.md)
-- [ ] Tool API reference (pulled from `mcp/schema.ts`)
-- [ ] Integration guide: how to add SWAP to a Conductor workflow
-- [ ] Demo GIF or terminal recording
-
-#### 4.6 npm Package
-- [ ] `package.json` — `"bin"` field pointing to compiled server and MCP entrypoints
-- [ ] `npm run build` → `dist/` with compiled JS
-- [ ] `npx swap-server` — starts the SWAP server
-- [ ] `npx swap-mcp` — starts the MCP adapter (for use in MCP config)
-- [ ] Verify: `npx` install from local tarball works end to end
-
-**Phase 4 exit criteria:** Public GitHub repo, clean README, `npx swap-server` works, Python and Go fixtures pass symbol extraction tests.
-
----
-
 ## Timeline Estimate
 
 | Phase | Scope | Estimated Time |
@@ -260,7 +211,6 @@ SWAP is built in 4 phases. Each phase ships something runnable — no phase ends
 | Phase 1 | Server + Registry + list_agents | 1 day |
 | Phase 2 | Tree-sitter + Intent Registry + claim/release | 2 days |
 | Phase 3 | Negotiation + Diff Streaming + Demo | 2 days |
-| Phase 4 | Hardening + Python/Go + npm package | 2 days |
 | **Total** | | **~7 days** |
 
 ---

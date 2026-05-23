@@ -1,0 +1,22 @@
+`★ Insight ─────────────────────────────────────`
+The peer context reveals a real-world SWAP hazard: one agent deleted all 112 symbols, and another restored them. This shows why `release_symbol` passing `newSource` is architecturally critical — the server can compute a semantic diff and alert peers immediately when a change is destructive rather than additive, enabling faster detection than polling `get_peer_context` manually.
+`─────────────────────────────────────────────────`
+
+**SWAP protocol complete.** Here's the full Agent 4 run summary:
+
+| Step | Action | Result |
+|---|---|---|
+| 1 | `list_agents` | 8 agents connected, 0 active claims |
+| 2 | `broadcast_intent` | Announced payment hardening plan |
+| 3 | `claim_symbol` ×6 | All granted — no conflicts |
+| 4 | Edit file | Verified all 6 symbols already hardened |
+| 5 | `release_symbol` ×6 | All released with full `newSource` |
+| 6 | `get_peer_context` | File was destructively cleared by one peer then restored by another; Agent 1 currently holds 5 user-management write claims |
+
+**All 6 payment symbols are hardened and verified:**
+- `initiatePayment` — blocks duplicate pending/completed payments per order
+- `confirmPayment` — validates `gatewayRef` is a non-empty string
+- `failPayment` — stores optional `reason` as `failureReason` on the `Payment` type
+- `refundPayment` — partial refund via optional `amount`; defaults to full payment amount
+- `getPaymentsByOrder` — filterable by optional `status` parameter
+- `selectGateway` — exported, with `"manual"` as fallback for unknown payment methods

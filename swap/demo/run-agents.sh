@@ -8,6 +8,8 @@ AGENTS_DIR="$SCRIPT_DIR/agents"
 CONFIGS_DIR="$SCRIPT_DIR/.mcp-configs"
 LOG_DIR="$SCRIPT_DIR/logs"
 
+COUNT="${1:-3}"
+
 mkdir -p "$CONFIGS_DIR" "$LOG_DIR"
 
 ts() { date '+%H:%M:%S'; }
@@ -29,17 +31,14 @@ SERVER_PID=$!
 disown $SERVER_PID
 sleep 2
 
-echo "[$(ts)] SWAP server up (PID $SERVER_PID). Spawning 10 agents..."
+echo "[$(ts)] SWAP server up. Spawning $COUNT agents..."
 echo ""
 
 PIDS=()
 
-for i in $(seq 1 10); do
+for i in $(seq 1 "$COUNT"); do
   CONFIG="$CONFIGS_DIR/agent-${i}.json"
   AGENT_LOG="$LOG_DIR/agent-${i}.log"
-
-  # Derive task name from first line of the agent prompt
-  TASK=$(head -1 "$AGENTS_DIR/agent${i}.md" | sed 's/You are Agent [0-9]* working on .*//' | xargs)
 
   cat > "$CONFIG" <<EOF
 {
@@ -58,12 +57,11 @@ for i in $(seq 1 10); do
 }
 EOF
 
-  echo "[$(ts)] Launching Agent $i → log: logs/agent-${i}.log"
+  echo "[$(ts)] Launching Agent $i → logs/agent-${i}.log"
 
   claude \
     --dangerously-skip-permissions \
     --model claude-sonnet-4-6 \
-    --no-update-check \
     --mcp-config "$CONFIG" \
     --add-dir "$FIXTURE" \
     -p "$(cat "$AGENTS_DIR/agent${i}.md")" \
@@ -74,12 +72,8 @@ EOF
 done
 
 echo ""
-echo "[$(ts)] All 10 agents launched. Watching logs in real time:"
-echo "[$(ts)] (tail -f logs/agent-*.log in another terminal for per-agent detail)"
+echo "[$(ts)] All $COUNT agents launched. Tailing logs..."
 echo ""
-
-# Stream all agent logs with agent prefix
-tail -f "$LOG_DIR"/agent-*.log --pid=${PIDS[0]} 2>/dev/null | sed 's|==> .*/agent-\([0-9]*\)\.log <==|── Agent \1 ──|' &
 
 for pid in "${PIDS[@]}"; do
   wait "$pid"
@@ -88,15 +82,14 @@ for pid in "${PIDS[@]}"; do
     if [[ "${PIDS[$i]}" == "$pid" ]]; then
       agent_num=$((i + 1))
       if [[ $code -eq 0 ]]; then
-        echo "[$(ts)] ✓ Agent $agent_num finished"
+        echo "[$(ts)] Agent $agent_num finished successfully"
       else
-        echo "[$(ts)] ✗ Agent $agent_num exited with code $code — check logs/agent-${agent_num}.log"
+        echo "[$(ts)] Agent $agent_num exited with code $code — check logs/agent-${agent_num}.log"
       fi
     fi
   done
 done
 
 echo ""
-echo "[$(ts)] All agents done. SWAP server still running on :7700"
-echo "[$(ts)] Full logs in: $LOG_DIR/"
-echo "[$(ts)] Stop server: fuser -k 7700/tcp"
+echo "[$(ts)] Done. Logs in: $LOG_DIR/"
+echo "[$(ts)] SWAP server still on :7700 — stop with: fuser -k 7700/tcp"

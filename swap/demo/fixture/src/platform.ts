@@ -207,42 +207,95 @@ export function recordUserLogin(id: string): void {
 
 // ─── Agent 2 — Product Catalog ────────────────────────────────────────────────
 
+// SWAP: claim_symbol createProduct (write)
 export function createProduct(data: Omit<Product, "id">): Product {
+  if (!data.name.trim()) throw new Error("Product name must be non-empty");
+  if (!data.category.trim()) throw new Error("Product category must be non-empty");
+  if (data.price <= 0) throw new Error("Product price must be greater than 0");
+  if (data.stock < 0) throw new Error("Product stock must be >= 0");
   const product: Product = { id: `prod_${Date.now()}`, ...data };
   products.set(product.id, product);
   return product;
 }
 
+// SWAP: claim_symbol getProductById (read)
 export function getProductById(id: string): Product | undefined {
   return products.get(id);
 }
 
+// SWAP: claim_symbol updateProduct (write)
 export function updateProduct(id: string, patch: Partial<Omit<Product, "id">>): Product {
   const product = products.get(id);
   if (!product) throw new Error(`Product ${id} not found`);
+  if (patch.price !== undefined && patch.price <= 0) {
+    throw new Error("Product price must be greater than 0");
+  }
+  if (patch.stock !== undefined && patch.stock < 0) {
+    throw new Error("Product stock must be >= 0");
+  }
   Object.assign(product, patch);
   return product;
 }
 
+// SWAP: claim_symbol deleteProduct (write)
 export function deleteProduct(id: string): void {
-  if (!products.delete(id)) throw new Error(`Product ${id} not found`);
+  if (!products.has(id)) throw new Error(`Product ${id} not found`);
+  const activeOrders = Array.from(orders.values()).filter(
+    (o) =>
+      o.status !== "cancelled" &&
+      o.status !== "delivered" &&
+      o.items.some((i) => i.productId === id)
+  );
+  if (activeOrders.length > 0) {
+    throw new Error(`Cannot delete product ${id}: referenced by ${activeOrders.length} active order(s)`);
+  }
+  products.delete(id);
 }
 
-export function listProductsByVendor(vendorId: string): Product[] {
-  return Array.from(products.values()).filter((p) => p.vendorId === vendorId);
+// SWAP: claim_symbol listProductsByVendor (write)
+export function listProductsByVendor(vendorId: string, sortBy?: "price" | "stock" | "name"): Product[] {
+  const result = Array.from(products.values()).filter((p) => p.vendorId === vendorId);
+  if (sortBy === "price") result.sort((a, b) => a.price - b.price);
+  else if (sortBy === "stock") result.sort((a, b) => a.stock - b.stock);
+  else if (sortBy === "name") result.sort((a, b) => a.name.localeCompare(b.name));
+  return result;
 }
 
-export function listProductsByCategory(category: string): Product[] {
-  return Array.from(products.values()).filter((p) => p.category === category);
+// SWAP: claim_symbol listProductsByCategory (write)
+export function listProductsByCategory(category: string, sortBy?: "price" | "stock" | "name"): Product[] {
+  const result = Array.from(products.values()).filter((p) => p.category === category);
+  if (sortBy === "price") result.sort((a, b) => a.price - b.price);
+  else if (sortBy === "stock") result.sort((a, b) => a.stock - b.stock);
+  else if (sortBy === "name") result.sort((a, b) => a.name.localeCompare(b.name));
+  return result;
 }
 
+// SWAP: claim_symbol getProductsByIds (write)
 export function getProductsByIds(ids: string[]): Product[] {
-  return ids.map((id) => products.get(id)).filter(Boolean) as Product[];
+  const result: Product[] = [];
+  for (const id of ids) {
+    const p = products.get(id);
+    if (p) result.push(p);
+  }
+  return result;
 }
 
 // ─── Agent 3 — Order Processing ───────────────────────────────────────────────
 
+export const ORDER_STATUS_TRANSITIONS: Record<Order["status"], Order["status"][]> = {
+  pending:   ["confirmed", "cancelled"],
+  confirmed: ["shipped",   "cancelled"],
+  shipped:   ["delivered", "cancelled"],
+  delivered: [],
+  cancelled: [],
+};
+
 export function createOrder(userId: string, items: OrderItem[]): Order {
+  if (!items || items.length === 0) throw new Error("Order must contain at least one item");
+  for (const item of items) {
+    if (item.quantity <= 0) throw new Error(`Item quantity must be > 0 (got ${item.quantity})`);
+    if (item.unitPrice <= 0) throw new Error(`Item unitPrice must be > 0 (got ${item.unitPrice})`);
+  }
   const total = items.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0);
   const order: Order = {
     id: `order_${Date.now()}`,
@@ -264,26 +317,39 @@ export function getOrderById(id: string): Order | undefined {
 export function updateOrderStatus(id: string, status: Order["status"]): Order {
   const order = orders.get(id);
   if (!order) throw new Error(`Order ${id} not found`);
+  const allowed = ORDER_STATUS_TRANSITIONS[order.status];
+  if (!allowed.includes(status)) {
+    throw new Error(
+      `Invalid status transition: ${order.status} → ${status}. ` +
+      `Allowed: ${allowed.length ? allowed.join(", ") : "none"}`
+    );
+  }
   order.status = status;
   order.updatedAt = new Date();
   return order;
 }
 
-export function getOrdersByUser(userId: string): Order[] {
-  return Array.from(orders.values()).filter((o) => o.userId === userId);
+export function getOrdersByUser(userId: string, status?: Order["status"]): Order[] {
+  const userOrders = Array.from(orders.values()).filter((o) => o.userId === userId);
+  return status ? userOrders.filter((o) => o.status === status) : userOrders;
 }
 
-export function cancelOrder(id: string): Order {
+export function cancelOrder(id: string, force = false): Order {
   const order = orders.get(id);
   if (!order) throw new Error(`Order ${id} not found`);
   if (order.status === "delivered") throw new Error("Cannot cancel a delivered order");
+  if (order.status === "shipped" && !force) {
+    throw new Error("Cannot cancel a shipped order without force flag");
+  }
   order.status = "cancelled";
   order.updatedAt = new Date();
   return order;
 }
 
-export function calculateOrderTotal(items: OrderItem[]): number {
-  return items.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0);
+export function calculateOrderTotal(items: OrderItem[], discountPct = 0): number {
+  const raw = items.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0);
+  if (discountPct < 0 || discountPct > 100) throw new Error("discountPct must be between 0 and 100");
+  return raw * (1 - discountPct / 100);
 }
 
 // ─── Agent 4 — Payment Processing ────────────────────────────────────────────

@@ -1,0 +1,25 @@
+SWAP protocol complete. Here's a summary of what was done and what peers are doing:
+
+---
+
+**Agent 2 — Product Catalog: DONE**
+
+All 7 symbols claimed, edited, and released. Changes made to `demo/fixture/src/platform.ts`:
+
+| Symbol | Change |
+|---|---|
+| `createProduct` | Validates: name non-empty, category non-empty, price > 0, stock >= 0 |
+| `getProductById` | No change (read-only, no business rules needed) |
+| `updateProduct` | Rejects patch with price <= 0 or stock < 0 |
+| `deleteProduct` | Guards against deletion if product is in any active (non-cancelled, non-delivered) order |
+| `listProductsByVendor` | Added optional `sortBy?: "price" \| "stock" \| "name"` |
+| `listProductsByCategory` | Added optional `sortBy?: "price" \| "stock" \| "name"` |
+| `getProductsByIds` | Explicit loop replacing `.filter(Boolean)` cast — missing ids silently skipped |
+
+**Peer context:** Agent 1 (User Management) has released claims on `getUserByEmail`, `updateUser`, `deleteUser`, `listUsers`, `recordUserLogin`. Agent 4 (Payment Processing) released `confirmPayment`, `failPayment`, `refundPayment`, `getPaymentsByOrder`, `selectGateway`. No conflicts with our symbols — all agents worked on separate sections of the file.
+
+`★ Insight ─────────────────────────────────────`
+- The `deleteProduct` active-order guard mirrors `deleteUser` exactly — both scan the shared `orders` Map for non-terminal statuses. This consistency makes the business rule easy to audit: the definition of "active order" is the same across entity types.
+- Making `sortBy` optional with `?:` means all existing callers compile without changes — TypeScript's optional parameters are backwards-compatible additions to function signatures.
+- The explicit `for...of` loop in `getProductsByIds` is marginally clearer than `.map().filter(Boolean)` because it avoids the intermediate mapped array and the need for a type assertion (`as Product[]`) to satisfy the type checker.
+`─────────────────────────────────────────────────`

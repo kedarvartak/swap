@@ -1,0 +1,23 @@
+`★ Insight ─────────────────────────────────────`
+The peer context reveals a critical multi-agent coordination hazard: Agent 2 performed full-file releases (passing the entire file as `newSource`) which the SWAP server interpreted as mass symbol deletions — 112–116 symbols gone — because it diffs the new source against its tracked state. This is the classic "thundering herd" problem in shared-file editing: when agents use full-file `newSource` in `release_symbol`, each release can inadvertently overwrite the accumulated work of all prior agents. The SWAP protocol's semantic diffing assumes agents only modified their claimed symbols, but a full-file newSource encodes everyone's state at the moment of that agent's last read.
+`─────────────────────────────────────────────────`
+
+**Agent 5 SWAP protocol complete.** Here's the status summary:
+
+---
+
+### What I did
+All 6 assigned symbols were claimed and released successfully with no conflicts:
+
+| Symbol | Change |
+|---|---|
+| `adjustInventory` | maxStock cap (10,000), `console.warn` when stock drops below 5 |
+| `reserveStock` | Product existence check before adjusting; clear insufficient-stock error message |
+| `restockProduct` | Guard: `quantity > 0` validation |
+| `getInventoryHistory` | Optional `start?: Date, end?: Date` filter parameters |
+| `getLowStockProducts` | Explicit `p.stock === 0` guard always included regardless of threshold |
+| `bulkRestock` | Collects all per-product errors, throws single aggregated error at end |
+
+### Peer environment
+- 3 other agents (1, 2, 4) are actively claiming symbols on `platform.ts`
+- Agent 2's last releases appear to have wiped the file to a near-empty state via full-file `newSource` diffs — the file may need reconciliation by whoever coordinates final state

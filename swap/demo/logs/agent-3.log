@@ -1,0 +1,21 @@
+`★ Insight ─────────────────────────────────────`
+The peer context shows the SWAP protocol working exactly as intended: Agent 1 (users), Agent 2 (products), Agent 4 (payments), and Agent 5 (inventory) all claimed non-overlapping symbol sets from the same file simultaneously — zero conflicts. The `PEER_DIFF` event from Agent 5 shows the server computed a full semantic diff of every symbol, which peers can use to detect breaking changes without re-reading the file. This is the core value of symbol-level coordination over file-level locking.
+`─────────────────────────────────────────────────`
+
+Agent 3's work is complete. Here's a summary of what was done:
+
+**SWAP protocol followed:** list_agents → broadcast_intent → 6 × claim_symbol → edit → 6 × release_symbol → get_peer_context. No conflicts encountered.
+
+**Changes made to `demo/fixture/src/platform.ts` (lines 245–313):**
+
+| Symbol | Change |
+|---|---|
+| `ORDER_STATUS_TRANSITIONS` | New exported constant — directed graph of valid status transitions as `Record<Order["status"], Order["status"][]>` |
+| `createOrder` | Guards: non-empty items array, `quantity > 0`, `unitPrice > 0` per item |
+| `getOrderById` | Unchanged (read-only, no meaningful guards needed) |
+| `updateOrderStatus` | Enforces transitions via `ORDER_STATUS_TRANSITIONS`; throws with a descriptive message listing allowed next states |
+| `getOrdersByUser` | Added optional `status?: Order["status"]` filter parameter |
+| `cancelOrder` | Blocks shipped orders by default; accepts `force = false` flag to override |
+| `calculateOrderTotal` | Added `discountPct = 0` parameter; validates 0–100 range; applies `raw * (1 - pct/100)` |
+
+**Peer activity observed:** Agents 1, 2, 4, and 5 are actively claiming their own symbol slices. No overlaps with Agent 3's symbols — the coordination protocol worked cleanly across all agents.

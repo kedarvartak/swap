@@ -1,0 +1,25 @@
+{
+  "name": "swap",
+  "version": "0.1.0",
+  "description": "Semantic Workspace Awareness Protocol — real-time coordination layer for parallel AI coding agents",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "server": "node --loader ts-node/esm server/index.ts",
+    "mcp": "node --loader ts-node/esm mcp/server.ts",
+    "test:phase1": "bash scripts/test-phase1.sh"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "uuid": "^11.0.0",
+    "ws": "^8.18.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/uuid": "^10.0.0",
+    "@types/ws": "^8.5.13",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.6.0"
+  }
+}

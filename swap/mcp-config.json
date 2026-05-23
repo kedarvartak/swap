@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "swap": {
+      "command": "node",
+      "args": ["--loader", "ts-node/esm", "/home/kedar/Desktop/Projects/comms/swap/mcp/server.ts"],
+      "env": {
+        "SWAP_SERVER_URL": "ws://localhost:7700"
+      }
+    }
+  }
+}

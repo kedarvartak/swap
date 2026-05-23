@@ -7,11 +7,15 @@ import type {
   BroadcastIntentPayload,
   ClaimPayload,
   ReleasePayload,
+  NegotiatePayload,
 } from '../shared/protocol.js';
 import { AgentRegistry } from './registry.js';
 import { MessageRouter } from './router.js';
 import { IntentRegistry } from './intent.js';
+import { DependencyGraph } from './graph.js';
+import { NegotiationManager, computePriority } from './negotiate.js';
 import { SnapshotStore } from '../parser/diff.js';
+import { extractFull } from '../parser/symbol-extractor.js';
 import {
   SERVER_PORT,
   HEARTBEAT_INTERVAL_MS,
@@ -19,13 +23,17 @@ import {
   CLAIM_TTL_MS,
 } from '../shared/constants.js';
 
-const registry = new AgentRegistry();
-const router = new MessageRouter(registry);
-const intentRegistry = new IntentRegistry();
-const snapshots = new SnapshotStore();
+const registry    = new AgentRegistry();
+const router      = new MessageRouter(registry);
+const intentReg   = new IntentRegistry();
+const graph       = new DependencyGraph();
+const negotiator  = new NegotiationManager();
+const snapshots   = new SnapshotStore();
+
+// Track pending negotiation responses: agentId → { sessionId, resolve }
+const pendingNegotiations = new Map<string, string>(); // agentId → sessionId
 
 const wss = new WebSocketServer({ port: SERVER_PORT });
-
 console.log(`[SWAP] Server listening on ws://localhost:${SERVER_PORT}`);
 
 wss.on('connection', (ws) => {
@@ -34,16 +42,15 @@ wss.on('connection', (ws) => {
 
   const registrationTimer = setTimeout(() => {
     if (!registeredId) {
-      console.warn(`[SWAP] Connection ${connectionId} timed out without registering`);
+      console.warn(`[SWAP] Connection ${connectionId} timed out`);
       ws.close(4001, 'Registration timeout');
     }
   }, REGISTRATION_TIMEOUT_MS);
 
   ws.on('message', (raw) => {
     let msg;
-    try {
-      msg = decode(raw.toString());
-    } catch {
+    try { msg = decode(raw.toString()); }
+    catch {
       ws.send(encode({ id: uuid(), type: 'ERROR', payload: { code: 'INVALID_JSON', message: 'Could not parse message' } }));
       return;
     }
@@ -51,30 +58,19 @@ wss.on('connection', (ws) => {
     // ── REGISTER ─────────────────────────────────────────────────────────────
     if (msg.type === 'REGISTER') {
       clearTimeout(registrationTimer);
-      const payload = msg.payload as RegisterPayload;
+      const p = msg.payload as RegisterPayload;
       const agentId = uuid();
       registeredId = agentId;
 
-      registry.add({
-        id: agentId,
-        ws,
-        worktreePath: payload.worktreePath,
-        taskDescription: payload.taskDescription,
-        status: 'idle',
-        connectedAt: Date.now(),
-        lastHeartbeat: Date.now(),
-        claims: [],
-        recentDiffs: [],
-      });
-      intentRegistry.registerAgent(agentId, payload.taskDescription);
+      registry.add({ id: agentId, ws, worktreePath: p.worktreePath, taskDescription: p.taskDescription,
+        status: 'idle', connectedAt: Date.now(), lastHeartbeat: Date.now(), claims: [], recentDiffs: [] });
+      intentReg.registerAgent(agentId, p.taskDescription);
 
       router.send(agentId, { id: uuid(), type: 'REGISTERED', payload: { agentId } });
-      router.broadcast(
-        { id: uuid(), type: 'AGENT_JOINED', payload: { agentId, taskDescription: payload.taskDescription, worktreePath: payload.worktreePath } },
-        agentId
-      );
+      router.broadcast({ id: uuid(), type: 'AGENT_JOINED',
+        payload: { agentId, taskDescription: p.taskDescription, worktreePath: p.worktreePath } }, agentId);
 
-      console.log(`[SWAP] Agent registered: ${agentId} — "${payload.taskDescription}"`);
+      console.log(`[SWAP] Agent registered: ${agentId} — "${p.taskDescription}"`);
       return;
     }
 
@@ -93,10 +89,8 @@ wss.on('connection', (ws) => {
     // ── LIST_AGENTS ───────────────────────────────────────────────────────────
     if (msg.type === 'LIST_AGENTS') {
       const agents = registry.getAll().map((a) => ({
-        id: a.id,
-        taskDescription: a.taskDescription,
-        status: a.status,
-        claims: intentRegistry.getClaims(a.id),
+        id: a.id, taskDescription: a.taskDescription, status: a.status,
+        claims: intentReg.getClaims(a.id),
       }));
       router.send(registeredId, { id: uuid(), type: 'AGENT_LIST', payload: { agents, totalActive: agents.length } });
       return;
@@ -104,78 +98,148 @@ wss.on('connection', (ws) => {
 
     // ── STATUS_UPDATE ─────────────────────────────────────────────────────────
     if (msg.type === 'STATUS_UPDATE') {
-      const payload = msg.payload as StatusUpdatePayload;
-      registry.updateStatus(registeredId, payload.status);
+      registry.updateStatus(registeredId, (msg.payload as StatusUpdatePayload).status);
       return;
     }
 
     // ── BROADCAST_INTENT ──────────────────────────────────────────────────────
     if (msg.type === 'BROADCAST_INTENT') {
-      const payload = msg.payload as BroadcastIntentPayload;
-      router.broadcast(
-        { id: uuid(), type: 'PEER_INTENT', payload: { agentId: registeredId, description: payload.description, filePaths: payload.filePaths } },
-        registeredId
-      );
+      const p = msg.payload as BroadcastIntentPayload;
+      router.broadcast({ id: uuid(), type: 'PEER_INTENT',
+        payload: { agentId: registeredId, description: p.description, filePaths: p.filePaths } }, registeredId);
       router.send(registeredId, { id: uuid(), type: 'PONG', payload: { delivered: registry.getAll().length - 1 } });
       return;
     }
 
     // ── CLAIM ─────────────────────────────────────────────────────────────────
     if (msg.type === 'CLAIM') {
-      const payload = msg.payload as ClaimPayload;
-      const result = intentRegistry.claim(
-        registeredId,
-        payload.filePath,
-        payload.symbolName,
-        payload.intent,
-        payload.estimatedMinutes
-      );
+      const p = msg.payload as ClaimPayload;
+      const claimerId = registeredId; // capture for async callbacks
+      const result = intentReg.claim(claimerId, p.filePath, p.symbolName, p.intent, p.estimatedMinutes);
 
       if (result.granted) {
         registry.addClaim(registeredId, result.claim);
-        console.log(`[SWAP] CLAIM GRANTED: ${registeredId} → ${payload.filePath}::${payload.symbolName} (${payload.intent})`);
-        router.send(registeredId, {
-          id: uuid(),
-          type: 'CLAIM_GRANTED',
-          payload: { filePath: payload.filePath, symbolName: payload.symbolName, claimId: result.claim.key },
-        });
+        console.log(`[SWAP] CLAIM GRANTED: ${registeredId.slice(0,8)} → ${p.symbolName} (${p.intent})`);
+        router.send(registeredId, { id: uuid(), type: 'CLAIM_GRANTED',
+          payload: { filePath: p.filePath, symbolName: p.symbolName, claimId: result.claim.key } });
       } else {
-        const agent = registry.get(result.conflict.heldBy);
-        console.log(`[SWAP] CLAIM CONFLICT: ${registeredId} vs ${result.conflict.heldBy} on ${payload.symbolName}`);
-        router.send(registeredId, {
-          id: uuid(),
-          type: 'CLAIM_CONFLICT',
-          payload: {
-            filePath: payload.filePath,
-            symbolName: payload.symbolName,
-            heldBy: result.conflict.heldBy,
-            heldByTask: agent?.taskDescription ?? result.conflict.heldByTask,
-            intent: result.conflict.intent,
-          },
-        });
+        // Trigger negotiation instead of flat rejection
+        const holderAgent = registry.get(result.conflict.heldBy);
+        const requesterAgent = registry.get(registeredId);
+
+        if (holderAgent && requesterAgent) {
+          const holderClaims = intentReg.getClaimsForSymbol(p.filePath, p.symbolName);
+          const holderClaim = holderClaims.find((c) => c.agentId === holderAgent.id);
+
+          if (holderClaim) {
+            // Create a provisional claim for requester so we can score them
+            const provisionalClaim = {
+              key: `${p.filePath}::${p.symbolName}`,
+              filePath: p.filePath, symbolName: p.symbolName,
+              intent: p.intent, agentId: registeredId,
+              claimedAt: Date.now(), estimatedRelease: Date.now() + 30 * 60 * 1000,
+              priority: computePriority(requesterAgent, { key: `${p.filePath}::${p.symbolName}`,
+                filePath: p.filePath, symbolName: p.symbolName, intent: p.intent,
+                agentId: registeredId, claimedAt: Date.now(),
+                estimatedRelease: Date.now() + 30 * 60 * 1000, priority: 0.5 }, graph),
+            };
+
+            console.log(`[SWAP] NEGOTIATION: ${registeredId.slice(0,8)} vs ${holderAgent.id.slice(0,8)} on ${p.symbolName}`);
+
+            // Run negotiation async — don't block the message handler
+            negotiator.negotiate(
+              p.filePath, p.symbolName,
+              holderAgent, requesterAgent,
+              holderClaim, provisionalClaim,
+              graph,
+              (agentId, m) => router.send(agentId, m as Parameters<typeof router.send>[1])
+            ).then((result) => {
+              const winnerAgent = registry.get(result.winner);
+              const loserAgent  = registry.get(result.loser);
+
+              if (result.winner === registeredId) {
+                // Requester wins — transfer claim
+                intentReg.release(holderAgent.id, p.filePath, p.symbolName);
+                registry.removeClaim(holderAgent.id, p.filePath, p.symbolName);
+                const granted = intentReg.claim(claimerId, p.filePath, p.symbolName, p.intent);
+                if (granted.granted) registry.addClaim(registeredId, granted.claim);
+
+                router.send(result.winner, { id: uuid(), type: 'CLAIM_GRANTED',
+                  payload: { filePath: p.filePath, symbolName: p.symbolName, claimId: provisionalClaim.key } });
+
+                // Suggest unclaimed symbols in same file for loser
+                const suggestion = getAlternativeSuggestion(p.filePath, p.symbolName, result.loser);
+                router.send(result.loser, { id: uuid(), type: 'DEFER',
+                  payload: { filePath: p.filePath, symbolName: p.symbolName,
+                    deferTo: result.winner, suggestion } });
+              } else {
+                // Holder keeps the claim — requester deferred
+                const suggestion = getAlternativeSuggestion(p.filePath, p.symbolName, claimerId);
+                router.send(result.loser, { id: uuid(), type: 'DEFER',
+                  payload: { filePath: p.filePath, symbolName: p.symbolName,
+                    deferTo: result.winner, suggestion } });
+              }
+
+              console.log(`[SWAP] NEGOTIATION RESOLVED: winner=${result.winner.slice(0,8)} (${result.reason})`);
+            }).catch((err) => {
+              console.error('[SWAP] Negotiation error:', err);
+              // Fallback: holder keeps claim
+              router.send(claimerId, { id: uuid(), type: 'CLAIM_CONFLICT',
+                payload: { filePath: p.filePath, symbolName: p.symbolName,
+                  heldBy: holderAgent.id, heldByTask: holderAgent.taskDescription,
+                  intent: holderClaim.intent } });
+            });
+
+            return; // negotiation result will be sent async
+          }
+        }
+
+        // Fallback if agents not found
+        console.log(`[SWAP] CLAIM CONFLICT (no negotiation): ${registeredId.slice(0,8)} on ${p.symbolName}`);
+        router.send(registeredId, { id: uuid(), type: 'CLAIM_CONFLICT',
+          payload: { filePath: p.filePath, symbolName: p.symbolName,
+            heldBy: result.conflict.heldBy, heldByTask: result.conflict.heldByTask,
+            intent: result.conflict.intent } });
+      }
+      return;
+    }
+
+    // ── NEGOTIATE ─────────────────────────────────────────────────────────────
+    if (msg.type === 'NEGOTIATE') {
+      const p = msg.payload as NegotiatePayload & { sessionId: string };
+      if (p.sessionId) {
+        negotiator.receiveNegotiateResponse(p.sessionId, registeredId, p.priority, p.justification);
       }
       return;
     }
 
     // ── RELEASE ───────────────────────────────────────────────────────────────
     if (msg.type === 'RELEASE') {
-      const payload = msg.payload as ReleasePayload;
-      const released = intentRegistry.release(registeredId, payload.filePath, payload.symbolName);
-      registry.removeClaim(registeredId, payload.filePath, payload.symbolName);
+      const p = msg.payload as ReleasePayload;
+      const released = intentReg.release(registeredId, p.filePath, p.symbolName);
+      registry.removeClaim(registeredId, p.filePath, p.symbolName);
 
-      console.log(`[SWAP] RELEASE: ${registeredId} → ${payload.filePath}::${payload.symbolName}`);
+      // Semantic diff + graph update if source provided
+      if (p.newSource && released) {
+        const { symbols, edges } = extractFull(p.newSource, p.filePath);
+        graph.updateFromEdges(edges);
 
-      // If source provided, compute semantic diff and broadcast to peers
-      if (payload.newSource && released) {
-        const diff = snapshots.diff(payload.filePath, payload.newSource, registeredId);
+        const diff = snapshots.diff(p.filePath, p.newSource, registeredId);
         if (diff.changes.length > 0) {
+          // Attach affected symbols from graph
+          for (const change of diff.changes) {
+            const key = `${p.filePath}::${change.symbolName}`;
+            change.affectedSymbols = Array.from(graph.getTransitiveDependents(key)).slice(0, 10);
+          }
+
           registry.addDiff(registeredId, diff);
           router.broadcast({ id: uuid(), type: 'PEER_DIFF', payload: diff }, registeredId);
-          console.log(`[SWAP] DIFF emitted: ${diff.changes.length} change(s) in ${payload.filePath}`);
+          console.log(`[SWAP] DIFF: ${diff.changes.length} change(s) in ${p.filePath} (${diff.stats.breaking} breaking)`);
         }
       }
 
-      router.send(registeredId, { id: uuid(), type: 'RELEASE_ACK', payload: { filePath: payload.filePath, symbolName: payload.symbolName } });
+      router.send(registeredId, { id: uuid(), type: 'RELEASE_ACK',
+        payload: { filePath: p.filePath, symbolName: p.symbolName } });
       return;
     }
 
@@ -184,11 +248,10 @@ wss.on('connection', (ws) => {
 
   ws.on('close', () => {
     if (!registeredId) return;
-    console.log(`[SWAP] Agent disconnected: ${registeredId}`);
-    const released = intentRegistry.releaseAll(registeredId);
-    intentRegistry.unregisterAgent(registeredId);
+    console.log(`[SWAP] Agent disconnected: ${registeredId.slice(0,8)}`);
+    const released = intentReg.releaseAll(registeredId);
+    intentReg.unregisterAgent(registeredId);
     registry.remove(registeredId);
-
     router.broadcast({ id: uuid(), type: 'AGENT_LEFT', payload: { agentId: registeredId } });
     if (released.length > 0) {
       router.broadcast({ id: uuid(), type: 'CLAIMS_RELEASED', payload: { agentId: registeredId, released } });
@@ -196,17 +259,30 @@ wss.on('connection', (ws) => {
   });
 
   ws.on('error', (err) => {
-    console.error(`[SWAP] WebSocket error for ${registeredId ?? connectionId}:`, err.message);
+    console.error(`[SWAP] WS error for ${registeredId?.slice(0,8) ?? connectionId}:`, err.message);
   });
 });
+
+function getAlternativeSuggestion(filePath: string, conflictSymbol: string, forAgentId: string): string {
+  const allClaims = intentReg.getAllClaims();
+  const claimedByOthers = new Set(
+    allClaims.filter((c) => c.agentId !== forAgentId).map((c) => c.symbolName)
+  );
+  // Suggest any symbol in the same file not currently claimed
+  const snapshot = snapshots.get(filePath);
+  if (!snapshot) return `Try working on other files while ${conflictSymbol} is in use`;
+  const unclaimed = snapshot.symbols.filter((s) => !claimedByOthers.has(s.name) && s.name !== conflictSymbol);
+  if (unclaimed.length === 0) return `All symbols in ${filePath} are currently claimed`;
+  return `Consider working on: ${unclaimed.slice(0, 3).map((s) => `${s.kind} \`${s.name}\``).join(', ')}`;
+}
 
 // ── Heartbeat watchdog ────────────────────────────────────────────────────────
 setInterval(() => {
   const stale = registry.pruneStale();
   for (const agentId of stale) {
-    console.warn(`[SWAP] Pruned stale agent: ${agentId}`);
-    const released = intentRegistry.releaseAll(agentId);
-    intentRegistry.unregisterAgent(agentId);
+    console.warn(`[SWAP] Pruned stale: ${agentId.slice(0,8)}`);
+    const released = intentReg.releaseAll(agentId);
+    intentReg.unregisterAgent(agentId);
     router.broadcast({ id: uuid(), type: 'AGENT_LEFT', payload: { agentId } });
     if (released.length > 0) {
       router.broadcast({ id: uuid(), type: 'CLAIMS_RELEASED', payload: { agentId, released } });
@@ -216,9 +292,9 @@ setInterval(() => {
 
 // ── Claim TTL watchdog ────────────────────────────────────────────────────────
 setInterval(() => {
-  const expired = intentRegistry.pruneExpired();
+  const expired = intentReg.pruneExpired();
   for (const { agentId, filePath, symbolName } of expired) {
-    console.warn(`[SWAP] Claim TTL expired: ${agentId} → ${filePath}::${symbolName}`);
+    console.warn(`[SWAP] TTL expired: ${agentId.slice(0,8)} → ${symbolName}`);
     registry.removeClaim(agentId, filePath, symbolName);
   }
 }, CLAIM_TTL_MS / 10);

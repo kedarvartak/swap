@@ -6,7 +6,22 @@ import JavaScript from 'tree-sitter-javascript';
 import { parse, detectLanguage, type SupportedLanguage } from './tree-sitter.js';
 import { TYPESCRIPT_SYMBOL_QUERY, inferKind as tsInferKind } from './languages/typescript.js';
 import { JAVASCRIPT_SYMBOL_QUERY, inferKind as jsInferKind } from './languages/javascript.js';
-import type { Symbol as CodeSymbol, SymbolKind } from '../shared/types.js';
+import type { Symbol as CodeSymbol, SymbolKind, DependencyEdge, EdgeKind } from '../shared/types.js';
+
+// Query to extract call expressions, imports, extends/implements
+const DEPENDENCY_QUERY = `
+  (call_expression function: (identifier) @callee)
+  (call_expression function: (member_expression property: (property_identifier) @callee))
+  (import_statement source: (string) @import_source)
+  (class_heritage (extends_clause value: (identifier) @extends))
+  (implements_clause (type_identifier) @implements)
+  (type_reference name: (type_identifier) @type_ref)
+`;
+
+export interface ExtractResult {
+  symbols: CodeSymbol[];
+  edges: DependencyEdge[];
+}
 
 interface RawCapture {
   name: string;
@@ -49,8 +64,12 @@ function runQuery(tree: Parser.Tree, queryStr: string, language: SupportedLangua
 }
 
 export function extractSymbols(source: string, filePath: string): CodeSymbol[] {
+  return extractFull(source, filePath).symbols;
+}
+
+export function extractFull(source: string, filePath: string): ExtractResult {
   const language = detectLanguage(filePath);
-  if (!language) return [];
+  if (!language) return { symbols: [], edges: [] };
 
   const tree = parse(source, language);
   const queryStr = language === 'javascript' ? JAVASCRIPT_SYMBOL_QUERY : TYPESCRIPT_SYMBOL_QUERY;
@@ -60,11 +79,10 @@ export function extractSymbols(source: string, filePath: string): CodeSymbol[] {
   try {
     captures = runQuery(tree, queryStr, language);
   } catch {
-    // Fallback: return empty if query fails on malformed source
-    return [];
+    return { symbols: [], edges: [] };
   }
 
-  return captures.map((cap) => {
+  const symbols: CodeSymbol[] = captures.map((cap) => {
     const kind = inferKind(cap.symbolNode.type) as SymbolKind;
     const exported =
       cap.symbolNode.parent?.type === 'export_statement' ||
@@ -82,6 +100,69 @@ export function extractSymbols(source: string, filePath: string): CodeSymbol[] {
       dependencies: [],
     };
   });
+
+  const edges = extractDependencyEdges(tree, filePath, symbols, language);
+  return { symbols, edges };
+}
+
+function extractDependencyEdges(
+  tree: Parser.Tree,
+  filePath: string,
+  symbols: CodeSymbol[],
+  language: SupportedLanguage
+): DependencyEdge[] {
+  const edges: DependencyEdge[] = [];
+  const symbolNames = new Set(symbols.map((s) => s.name));
+
+  let depCaptures;
+  try {
+    const q = new Parser.Query(getLang(language), DEPENDENCY_QUERY);
+    depCaptures = q.captures(tree.rootNode);
+  } catch {
+    return [];
+  }
+
+  // Find which symbol each capture node lives inside
+  for (const { name: captureName, node } of depCaptures) {
+    const referencedName = node.text.replace(/['"]/g, '');
+    if (!referencedName || referencedName.length > 50) continue;
+
+    // Find the enclosing symbol (the function/class this call lives inside)
+    const enclosingSymbol = findEnclosingSymbol(node, symbols);
+    if (!enclosingSymbol) continue;
+
+    const fromKey = `${filePath}::${enclosingSymbol.name}`;
+    const toKey = `${filePath}::${referencedName}`;
+
+    // Only add edges to symbols we know about in this file
+    if (!symbolNames.has(referencedName)) continue;
+    if (enclosingSymbol.name === referencedName) continue;
+
+    const kind: EdgeKind =
+      captureName === 'extends' ? 'extend' :
+      captureName === 'implements' ? 'implement' :
+      captureName === 'type_ref' ? 'type-use' :
+      captureName === 'import_source' ? 'import' :
+      'call';
+
+    edges.push({ from: fromKey, to: toKey, kind });
+  }
+
+  return edges;
+}
+
+function findEnclosingSymbol(node: Parser.SyntaxNode, symbols: CodeSymbol[]): CodeSymbol | null {
+  const byte = node.startIndex;
+  // Find the smallest symbol that contains this byte position
+  let best: CodeSymbol | null = null;
+  for (const sym of symbols) {
+    if (sym.startByte <= byte && byte <= sym.endByte) {
+      if (!best || (sym.endByte - sym.startByte) < (best.endByte - best.startByte)) {
+        best = sym;
+      }
+    }
+  }
+  return best;
 }
 
 function extractSignature(node: Parser.SyntaxNode): string | undefined {

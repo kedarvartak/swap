@@ -22,15 +22,17 @@ const AGENT_WORKTREE = process.env.SWAP_WORKTREE_PATH ?? process.cwd();
 // ── State ────────────────────────────────────────────────────────────────────
 let agentId: string | null = null;
 let ws: WebSocket;
+let wsReady: Promise<void>;
+let wsReadyResolve: () => void;
 const eventBuffer: Message[] = [];
 const pendingRequests = new Map<string, (msg: Message) => void>();
 
 // ── WebSocket connection ─────────────────────────────────────────────────────
 function connect() {
+  wsReady = new Promise((resolve) => { wsReadyResolve = resolve; });
   ws = new WebSocket(SWAP_SERVER_URL);
 
   ws.on('open', () => {
-    // Register with the SWAP server
     ws.send(encode({
       id: uuid(),
       type: 'REGISTER',
@@ -53,9 +55,10 @@ function connect() {
       return;
     }
 
-    // Capture agent ID on registration
+    // Capture agent ID on registration and unblock tool calls
     if (msg.type === 'REGISTERED') {
       agentId = (msg.payload as { agentId: string }).agentId;
+      wsReadyResolve?.();
       return;
     }
 
@@ -82,35 +85,27 @@ function connect() {
   ws.on('error', () => { /* handled by close event */ });
 }
 
-// Send a request to SWAP server and await a matching response (by message id)
+// Send a request and await a response whose type is in responseTypes.
+// Uses a one-shot listener keyed by expected response type to avoid race conditions.
 function request(type: Message['type'], payload: unknown, responseTypes: string[]): Promise<Message> {
   return new Promise((resolve, reject) => {
     const id = uuid();
     const timeout = setTimeout(() => {
-      pendingRequests.delete(id);
-      reject(new Error(`SWAP request ${type} timed out`));
+      ws.removeListener('message', listener);
+      reject(new Error(`SWAP ${type} timed out`));
     }, 10_000);
 
-    // Listen for any response of the expected types
-    const handler = (msg: Message) => {
-      if (responseTypes.includes(msg.type)) {
-        clearTimeout(timeout);
-        resolve(msg);
-      }
-    };
-
-    // Override: intercept the next response that matches our expected types
-    const wrappedHandler = (raw: Parameters<typeof ws.on>[1] extends (data: infer D) => void ? D : never) => {
+    const listener = (raw: Buffer) => {
       let msg: Message;
       try { msg = decode(raw.toString()); } catch { return; }
       if (responseTypes.includes(msg.type)) {
-        ws.removeListener('message', wrappedHandler as never);
         clearTimeout(timeout);
+        ws.removeListener('message', listener);
         resolve(msg);
       }
     };
 
-    ws.on('message', wrappedHandler as never);
+    ws.on('message', listener);
     ws.send(encode({ id, type, payload }));
   });
 }
@@ -184,6 +179,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
 }));
 
 server.setRequestHandler(CallToolRequestSchema, async (req) => {
+  await wsReady; // ensure registered before any tool call
   const { name, arguments: args } = req.params;
 
   if (name === 'list_agents') {

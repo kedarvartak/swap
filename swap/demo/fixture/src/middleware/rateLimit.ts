@@ -56,18 +56,11 @@ export function recordAttempt(identifier: string, success: boolean, config = DEF
   attempts.set(identifier, record);
 }
 
-// Rate-limited wrapper around authenticate — this is the function
-// Agent A will add rate limiting to and Agent B will refactor
+// Thin wrapper — rate limit logic now lives inside authenticate() itself.
 export function authenticateWithRateLimit(
   email: string,
   password: string,
-  config?: RateLimitConfig
+  config: RateLimitConfig = DEFAULT_CONFIG
 ): AuthResult {
-  if (!checkRateLimit(email, config)) {
-    return { success: false, error: 'Too many failed attempts. Try again later.' };
-  }
-
-  const result = authenticate(email, password);
-  recordAttempt(email, result.success, config);
-  return result;
+  return authenticate(email, password, config);
 }

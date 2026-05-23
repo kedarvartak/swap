@@ -1,10 +1,17 @@
-import type { User, AuthResult, LoginCredentials, AuthToken } from '../types/auth.js';
+import type { User, AuthResult, LoginCredentials, AuthToken, RateLimitConfig, UserStore } from '../types/auth.js';
+import { checkRateLimit, recordAttempt } from '../middleware/rateLimit.js';
 
-// Simple in-memory store for demo purposes
-const users: Map<string, User> = new Map();
 const tokens: Map<string, AuthToken> = new Map();
 
-export function createUser(email: string, passwordHash: string, role: User['role'] = 'user'): User {
+// Default in-memory store — callers may inject an alternative via the store parameter
+const defaultStore: UserStore = new Map<string, User>();
+
+export function createUser(
+  email: string,
+  passwordHash: string,
+  role: User['role'] = 'user',
+  store: UserStore = defaultStore,
+): User {
   const user: User = {
     id: Math.random().toString(36).slice(2),
     email,
@@ -12,23 +19,31 @@ export function createUser(email: string, passwordHash: string, role: User['role
     role,
     createdAt: new Date(),
   };
-  users.set(user.id, user);
+  store.set(user.id, user);
   return user;
 }
 
-export function findUserByEmail(email: string): User | undefined {
-  return Array.from(users.values()).find((u) => u.email === email);
+export function findUserByEmail(email: string, store: UserStore = defaultStore): User | undefined {
+  return Array.from(store.values()).find((u) => u.email === email);
 }
 
-export function authenticate(email: string, password: string): AuthResult {
+export function authenticate(email: string, password: string, rateLimitConfig?: RateLimitConfig): AuthResult {
+  if (rateLimitConfig && !checkRateLimit(email, rateLimitConfig)) {
+    return { success: false, error: 'Too many failed attempts. Try again later.' };
+  }
+
   const user = findUserByEmail(email);
   if (!user) {
-    return { success: false, error: 'User not found' };
+    const result: AuthResult = { success: false, error: 'User not found' };
+    if (rateLimitConfig) recordAttempt(email, false, rateLimitConfig);
+    return result;
   }
 
   // Simplified password check — in production use bcrypt
   if (user.passwordHash !== password) {
-    return { success: false, error: 'Invalid credentials' };
+    const result: AuthResult = { success: false, error: 'Invalid credentials' };
+    if (rateLimitConfig) recordAttempt(email, false, rateLimitConfig);
+    return result;
   }
 
   const token: AuthToken = {
@@ -41,19 +56,20 @@ export function authenticate(email: string, password: string): AuthResult {
   tokens.set(token.token, token);
   user.lastLogin = new Date();
 
+  if (rateLimitConfig) recordAttempt(email, true, rateLimitConfig);
   return { success: true, token };
 }
 
-export function login(credentials: LoginCredentials): AuthResult {
-  return authenticate(credentials.email, credentials.password);
+export function login(credentials: LoginCredentials, rateLimitConfig?: RateLimitConfig): AuthResult {
+  return authenticate(credentials.email, credentials.password, rateLimitConfig);
 }
 
 export function logout(tokenStr: string): boolean {
   return tokens.delete(tokenStr);
 }
 
-export function resetPassword(userId: string, newPasswordHash: string): boolean {
-  const user = users.get(userId);
+export function resetPassword(userId: string, newPasswordHash: string, store: UserStore = defaultStore): boolean {
+  const user = store.get(userId);
   if (!user) return false;
   user.passwordHash = newPasswordHash;
   return true;

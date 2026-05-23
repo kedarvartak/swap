@@ -31,3 +31,9 @@ export interface RateLimitConfig {
   windowMs: number;
   blockDurationMs: number;
 }
+
+export interface UserStore {
+  get(id: string): User | undefined;
+  set(id: string, user: User): void;
+  values(): IterableIterator<User>;
+}

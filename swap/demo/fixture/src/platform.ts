@@ -477,11 +477,21 @@ export function bulkRestock(updates: { productId: string; quantity: number }[]):
 // ─── Agent 6 — Cart & Checkout ────────────────────────────────────────────────
 
 export function getCart(userId: string): Cart {
-  return carts.get(userId) ?? { userId, items: [], updatedAt: new Date() };
+  if (!carts.has(userId)) {
+    carts.set(userId, { userId, items: [], updatedAt: new Date() });
+  }
+  return carts.get(userId)!;
 }
 
 export function addToCart(userId: string, productId: string, quantity: number): Cart {
+  if (quantity <= 0) throw new Error(`quantity must be > 0 (got ${quantity})`);
+  const product = products.get(productId);
+  if (!product) throw new Error(`Product ${productId} not found`);
   const cart = getCart(userId);
+  const totalRequested = (cart.items.find((i) => i.productId === productId)?.quantity ?? 0) + quantity;
+  if (product.stock < totalRequested) {
+    throw new Error(`Insufficient stock for product ${productId}: requested ${totalRequested}, available ${product.stock}`);
+  }
   const existing = cart.items.find((i) => i.productId === productId);
   if (existing) {
     existing.quantity += quantity;
@@ -489,15 +499,16 @@ export function addToCart(userId: string, productId: string, quantity: number): 
     cart.items.push({ productId, quantity });
   }
   cart.updatedAt = new Date();
-  carts.set(userId, cart);
   return cart;
 }
 
 export function removeFromCart(userId: string, productId: string): Cart {
   const cart = getCart(userId);
+  if (!cart.items.some((i) => i.productId === productId)) {
+    throw new Error(`Product ${productId} is not in the cart for user ${userId}`);
+  }
   cart.items = cart.items.filter((i) => i.productId !== productId);
   cart.updatedAt = new Date();
-  carts.set(userId, cart);
   return cart;
 }
 
@@ -514,6 +525,14 @@ export function checkoutCart(userId: string, method: Payment["method"]): { order
     return { productId: ci.productId, quantity: ci.quantity, unitPrice: product.price };
   });
   const order = createOrder(userId, items);
+  try {
+    for (const item of order.items) {
+      reserveStock(item.productId, item.quantity);
+    }
+  } catch (err) {
+    cancelOrder(order.id);
+    throw new Error(`Checkout failed — order ${order.id} cancelled: ${(err as Error).message}`);
+  }
   const payment = initiatePayment(order.id, method);
   clearCart(userId);
   return { order, payment };

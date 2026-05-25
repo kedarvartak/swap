@@ -1,0 +1,228 @@
+import type {
+  AgentRecord, SymbolClaim, NegotiationRecord,
+  SemanticDiff, LogEvent, DependencyEdge, DashboardState,
+} from '../types/swap';
+
+const now = Date.now();
+
+export const initialAgents: AgentRecord[] = [
+  {
+    id: 'agt-a1b2c3d4',
+    shortId: 'a1b2',
+    worktreePath: '/tmp/swap/worktree-a1b2',
+    taskDescription: 'Refactor auth middleware + session handling',
+    status: 'active',
+    connectedAt: now - 4 * 60 * 1000,
+    lastHeartbeat: now - 2000,
+    claimCount: 3,
+    priorityScore: 0.78,
+  },
+  {
+    id: 'agt-e5f6g7h8',
+    shortId: 'e5f6',
+    worktreePath: '/tmp/swap/worktree-e5f6',
+    taskDescription: 'Add payment processing validation logic',
+    status: 'active',
+    connectedAt: now - 2 * 60 * 1000,
+    lastHeartbeat: now - 1200,
+    claimCount: 2,
+    priorityScore: 0.85,
+  },
+  {
+    id: 'agt-i9j0k1l2',
+    shortId: 'i9j0',
+    worktreePath: '/tmp/swap/worktree-i9j0',
+    taskDescription: 'Cleanup: rename legacy API response types',
+    status: 'waiting',
+    connectedAt: now - 6 * 60 * 1000,
+    lastHeartbeat: now - 5000,
+    claimCount: 1,
+    priorityScore: 0.31,
+  },
+  {
+    id: 'agt-m3n4o5p6',
+    shortId: 'm3n4',
+    worktreePath: '/tmp/swap/worktree-m3n4',
+    taskDescription: 'Update inventory management schema migration',
+    status: 'idle',
+    connectedAt: now - 8 * 60 * 1000,
+    lastHeartbeat: now - 12000,
+    claimCount: 0,
+    priorityScore: 0.62,
+  },
+];
+
+export const initialClaims: SymbolClaim[] = [
+  {
+    key: 'src/auth/middleware.ts::validateSession',
+    filePath: 'src/auth/middleware.ts',
+    symbolName: 'validateSession',
+    symbolKind: 'function',
+    intent: 'refactor',
+    agentId: 'agt-a1b2c3d4',
+    agentShortId: 'a1b2',
+    claimedAt: now - 90000,
+    estimatedRelease: now + 120000,
+    priority: 0.78,
+  },
+  {
+    key: 'src/auth/middleware.ts::SessionStore',
+    filePath: 'src/auth/middleware.ts',
+    symbolName: 'SessionStore',
+    symbolKind: 'class',
+    intent: 'write',
+    agentId: 'agt-a1b2c3d4',
+    agentShortId: 'a1b2',
+    claimedAt: now - 60000,
+    estimatedRelease: now + 150000,
+    priority: 0.74,
+  },
+  {
+    key: 'src/payment/processor.ts::processPayment',
+    filePath: 'src/payment/processor.ts',
+    symbolName: 'processPayment',
+    symbolKind: 'function',
+    intent: 'write',
+    agentId: 'agt-e5f6g7h8',
+    agentShortId: 'e5f6',
+    claimedAt: now - 45000,
+    estimatedRelease: now + 90000,
+    priority: 0.85,
+  },
+  {
+    key: 'src/shared/types.ts::ApiResponse',
+    filePath: 'src/shared/types.ts',
+    symbolName: 'ApiResponse',
+    symbolKind: 'interface',
+    intent: 'read',
+    agentId: 'agt-i9j0k1l2',
+    agentShortId: 'i9j0',
+    claimedAt: now - 30000,
+    estimatedRelease: now + 60000,
+    priority: 0.31,
+  },
+];
+
+export const initialNegotiations: NegotiationRecord[] = [
+  {
+    sessionId: 'neg-xx99yy00',
+    filePath: 'src/auth/middleware.ts',
+    symbolName: 'validateSession',
+    agentA: 'a1b2',
+    agentB: 'e5f6',
+    winner: null,
+    loser: null,
+    priorityA: 0.78,
+    priorityB: 0.71,
+    reason: null,
+    startedAt: now - 3000,
+    resolvedAt: null,
+    active: true,
+  },
+  {
+    sessionId: 'neg-aa11bb22',
+    filePath: 'src/shared/types.ts',
+    symbolName: 'ApiResponse',
+    agentA: 'i9j0',
+    agentB: 'e5f6',
+    winner: 'e5f6',
+    loser: 'i9j0',
+    priorityA: 0.31,
+    priorityB: 0.82,
+    reason: 'priority',
+    startedAt: now - 180000,
+    resolvedAt: now - 176000,
+    active: false,
+  },
+  {
+    sessionId: 'neg-cc33dd44',
+    filePath: 'src/payment/processor.ts',
+    symbolName: 'PaymentConfig',
+    agentA: 'e5f6',
+    agentB: 'm3n4',
+    winner: 'e5f6',
+    loser: 'm3n4',
+    priorityA: 0.85,
+    priorityB: 0.85,
+    reason: 'tie-break',
+    startedAt: now - 300000,
+    resolvedAt: now - 295000,
+    active: false,
+  },
+];
+
+export const initialDiffs: SemanticDiff[] = [
+  {
+    id: 'diff-001',
+    agentId: 'agt-e5f6g7h8',
+    agentShortId: 'e5f6',
+    filePath: 'src/payment/processor.ts',
+    releasedAt: now - 240000,
+    changes: [
+      {
+        symbolName: 'validateCard',
+        symbolKind: 'function',
+        changeType: 'SIGNATURE_CHANGED',
+        breakingChange: true,
+        summary: 'Added required `cvv` param',
+      },
+      {
+        symbolName: 'PaymentResult',
+        symbolKind: 'interface',
+        changeType: 'ADDED',
+        breakingChange: false,
+        summary: 'New result type for payment ops',
+      },
+    ],
+    stats: { added: 1, deleted: 0, modified: 1, breaking: 1 },
+  },
+  {
+    id: 'diff-002',
+    agentId: 'agt-m3n4o5p6',
+    agentShortId: 'm3n4',
+    filePath: 'src/inventory/schema.ts',
+    releasedAt: now - 480000,
+    changes: [
+      {
+        symbolName: 'InventoryItem',
+        symbolKind: 'interface',
+        changeType: 'BODY_CHANGED',
+        breakingChange: false,
+        summary: 'Added optional `warehouseId` field',
+      },
+    ],
+    stats: { added: 0, deleted: 0, modified: 1, breaking: 0 },
+  },
+];
+
+export const initialEdges: DependencyEdge[] = [
+  { from: 'src/auth/middleware.ts::validateSession', to: 'src/auth/middleware.ts::SessionStore', kind: 'call' },
+  { from: 'src/auth/middleware.ts::SessionStore', to: 'src/shared/types.ts::ApiResponse', kind: 'type-use' },
+  { from: 'src/payment/processor.ts::processPayment', to: 'src/payment/processor.ts::validateCard', kind: 'call' },
+  { from: 'src/payment/processor.ts::processPayment', to: 'src/shared/types.ts::ApiResponse', kind: 'type-use' },
+  { from: 'src/inventory/schema.ts::InventoryItem', to: 'src/shared/types.ts::ApiResponse', kind: 'type-use' },
+];
+
+export const initialLog: LogEvent[] = [
+  { id: 'l1', timestamp: now - 480000, type: 'AGENT_JOIN',  agentShortId: 'm3n4', message: 'agent m3n4 connected — "Update inventory management schema migration"' },
+  { id: 'l2', timestamp: now - 300000, type: 'CONFLICT',    agentShortId: 'e5f6', message: 'conflict on src/payment/processor.ts::PaymentConfig (e5f6 vs m3n4)' },
+  { id: 'l3', timestamp: now - 295000, type: 'RESOLVE',     agentShortId: 'e5f6', message: 'resolved — winner: e5f6 [tie-break by claim time]' },
+  { id: 'l4', timestamp: now - 240000, type: 'DIFF',        agentShortId: 'e5f6', message: 'semantic diff: src/payment/processor.ts — 1 breaking change (validateCard)' },
+  { id: 'l5', timestamp: now - 180000, type: 'CONFLICT',    agentShortId: 'i9j0', message: 'conflict on src/shared/types.ts::ApiResponse (i9j0 vs e5f6)' },
+  { id: 'l6', timestamp: now - 176000, type: 'RESOLVE',     agentShortId: 'e5f6', message: 'resolved — winner: e5f6 [priority 0.82 > 0.31]' },
+  { id: 'l7', timestamp: now - 90000,  type: 'CLAIM',       agentShortId: 'a1b2', message: 'a1b2 claimed src/auth/middleware.ts::validateSession [refactor]' },
+  { id: 'l8', timestamp: now - 3000,   type: 'CONFLICT',    agentShortId: 'e5f6', message: 'conflict on src/auth/middleware.ts::validateSession (a1b2 vs e5f6)' },
+  { id: 'l9', timestamp: now - 3000,   type: 'NEGOTIATE',   agentShortId: undefined, message: 'negotiation session neg-xx99yy00 started — awaiting responses...' },
+];
+
+export function buildInitialState(): DashboardState {
+  return {
+    agents: initialAgents,
+    claims: initialClaims,
+    negotiations: initialNegotiations,
+    diffs: initialDiffs,
+    log: initialLog,
+    edges: initialEdges,
+    tick: 0,
+  };
+}

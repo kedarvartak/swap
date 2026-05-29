@@ -1,8 +1,6 @@
-import { useState, useEffect, type CSSProperties } from 'react';
-import type { DashboardState } from './types/swap';
-import { buildInitialState } from './data/mockData';
-import { tick } from './data/simulator';
+import { useState, type CSSProperties } from 'react';
 import { colors, fonts } from './styles/tokens';
+import { useSwapSocket } from './hooks/useSwapSocket';
 
 import { Header } from './components/Header';
 import { AgentsPanel } from './components/AgentsPanel';
@@ -42,17 +40,9 @@ const s = {
   } as CSSProperties,
 };
 
-const TICK_INTERVAL_MS = 2000;
-
 export function App() {
-  const [state, setState] = useState<DashboardState>(buildInitialState);
-
-  useEffect(() => {
-    const id = setInterval(() => {
-      setState((prev) => tick(prev));
-    }, TICK_INTERVAL_MS);
-    return () => clearInterval(id);
-  }, []);
+  const [mode, setMode] = useState<'live' | 'mock'>('live');
+  const { state, connectionStatus } = useSwapSocket(mode);
 
   const activeNegotiations = state.negotiations.filter((n) => n.active).length;
 
@@ -63,6 +53,8 @@ export function App() {
         claimCount={state.claims.length}
         activeNegotiations={activeNegotiations}
         tick={state.tick}
+        connectionStatus={connectionStatus}
+        onToggleMode={() => setMode((m) => (m === 'live' ? 'mock' : 'live'))}
       />
 
       {/* 3-column top section */}

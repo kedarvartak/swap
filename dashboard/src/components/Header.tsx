@@ -1,11 +1,14 @@
 import type { CSSProperties } from 'react';
 import { colors, fonts, sizes, spacing } from '../styles/tokens';
+import type { ConnectionStatus } from '../hooks/useSwapSocket';
 
 interface HeaderProps {
   agentCount: number;
   claimCount: number;
   activeNegotiations: number;
   tick: number;
+  connectionStatus: ConnectionStatus;
+  onToggleMode: () => void;
 }
 
 const s = {
@@ -107,9 +110,43 @@ const s = {
     fontFamily: fonts.mono,
     color: colors.greenDim,
   } as CSSProperties,
+
+  badge: (status: ConnectionStatus): CSSProperties => ({
+    padding: '2px 8px',
+    border: `1px solid ${
+      status === 'live'         ? colors.green  :
+      status === 'reconnecting' ? colors.amber  :
+      status === 'connecting'   ? colors.cyan   :
+                                  colors.grayDim
+    }`,
+    color:
+      status === 'live'         ? colors.green  :
+      status === 'reconnecting' ? colors.amber  :
+      status === 'connecting'   ? colors.cyan   :
+                                  colors.gray,
+    fontSize: sizes.xs,
+    letterSpacing: '0.1em',
+    cursor: 'pointer',
+    userSelect: 'none',
+    animation: status === 'live' ? 'none' : 'pulse 1.5s infinite',
+  }),
 };
 
-export function Header({ agentCount, claimCount, activeNegotiations, tick }: HeaderProps) {
+const STATUS_LABEL: Record<ConnectionStatus, string> = {
+  live:         '◉ LIVE',
+  connecting:   '○ CONNECTING',
+  reconnecting: '○ RECONNECTING',
+  offline:      '◌ MOCK',
+};
+
+export function Header({
+  agentCount,
+  claimCount,
+  activeNegotiations,
+  tick,
+  connectionStatus,
+  onToggleMode,
+}: HeaderProps) {
   const ts = new Date().toISOString().replace('T', ' ').slice(0, 19);
 
   return (
@@ -140,6 +177,14 @@ export function Header({ agentCount, claimCount, activeNegotiations, tick }: Hea
       </div>
 
       <div style={s.right}>
+        <span
+          style={s.badge(connectionStatus)}
+          onClick={onToggleMode}
+          title="Click to toggle live / mock mode"
+        >
+          {STATUS_LABEL[connectionStatus]}
+        </span>
+        <span style={{ color: colors.grayDim }}>|</span>
         <span>TICK {String(tick).padStart(4, '0')}</span>
         <span style={{ color: colors.grayDim }}>|</span>
         <span>{ts} UTC</span>

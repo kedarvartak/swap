@@ -44,6 +44,8 @@ export type MessageType =
 export interface RegisterPayload {
   worktreePath: string;
   taskDescription: string;
+  agentId?: string;
+  clientKind?: 'mcp' | 'hook';
 }
 
 export interface ClaimPayload {
@@ -51,12 +53,14 @@ export interface ClaimPayload {
   symbolName: string;
   intent: ClaimIntent;
   estimatedMinutes?: number;
+  source?: 'mcp' | 'hook';
 }
 
 export interface ReleasePayload {
   filePath: string;
   symbolName: string;
   newSource?: string;
+  source?: 'mcp' | 'hook';
 }
 
 export interface NegotiatePayload {

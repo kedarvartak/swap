@@ -34,7 +34,9 @@ export class IntentRegistry {
 
   registerAgent(agentId: string, taskDescription: string) {
     this.agentTaskMap.set(agentId, taskDescription);
-    this.agentKeys.set(agentId, new Set());
+    if (!this.agentKeys.has(agentId)) {
+      this.agentKeys.set(agentId, new Set());
+    }
   }
 
   unregisterAgent(agentId: string) {

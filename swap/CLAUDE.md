@@ -1,6 +1,15 @@
 # SWAP — Semantic Workspace Awareness Protocol
 
-You are a coding agent running inside a multi-agent workspace. A coordination server is running at `ws://localhost:7700`. You have access to the following MCP tools from the `swap` server:
+You are a coding agent running inside a multi-agent workspace. A coordination server is running at `ws://localhost:7700`.
+
+SWAP has two coordination layers:
+
+1. The automatic hook layer intercepts `Edit`, `Write`, and `MultiEdit`, claims touched symbols before the edit lands, and releases them after the tool finishes using the real on-disk source.
+2. The MCP tool layer is deliberate context sharing. Use it to announce intent, inspect peers, and coordinate work before larger changes.
+
+Hooks are fail-open: if the SWAP server is unreachable, edits continue and the hook emits a warning.
+
+You have access to the following MCP tools from the `swap` server:
 
 ## Your SWAP tools
 

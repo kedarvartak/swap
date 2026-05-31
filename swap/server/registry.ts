@@ -4,6 +4,7 @@ import { HEARTBEAT_TIMEOUT_MS, MAX_RECENT_DIFFS } from '../shared/constants.js';
 
 interface LiveAgent extends AgentRecord {
   ws: WebSocket;
+  clientKind?: 'mcp' | 'hook';
 }
 
 export class AgentRegistry {
@@ -37,6 +38,14 @@ export class AgentRegistry {
   updateStatus(agentId: string, status: AgentStatus): void {
     const agent = this.agents.get(agentId);
     if (agent) agent.status = status;
+  }
+
+  updateConnection(agentId: string, ws: WebSocket): void {
+    const agent = this.agents.get(agentId);
+    if (!agent) return;
+    agent.ws = ws;
+    agent.status = 'idle';
+    agent.lastHeartbeat = Date.now();
   }
 
   addClaim(agentId: string, claim: SymbolClaim): void {

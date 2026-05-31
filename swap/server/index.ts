@@ -1,4 +1,6 @@
-import { WebSocketServer } from 'ws';
+import fs from 'node:fs';
+import http from 'node:http';
+import { WebSocketServer, type WebSocket } from 'ws';
 import { v4 as uuid } from 'uuid';
 import { decode, encode } from '../shared/protocol.js';
 import type {
@@ -18,6 +20,7 @@ import { SnapshotStore } from '../parser/diff.js';
 import { extractFull } from '../parser/symbol-extractor.js';
 import {
   SERVER_PORT,
+  DEFAULT_SERVER_SOCKET_PATH,
   HEARTBEAT_INTERVAL_MS,
   REGISTRATION_TIMEOUT_MS,
   CLAIM_TTL_MS,
@@ -36,9 +39,25 @@ const pendingNegotiations = new Map<string, string>(); // agentId → sessionId
 const wss = new WebSocketServer({ port: SERVER_PORT });
 console.log(`[SWAP] Server listening on ws://localhost:${SERVER_PORT}`);
 
-wss.on('connection', (ws) => {
+try {
+  if (fs.existsSync(DEFAULT_SERVER_SOCKET_PATH)) fs.unlinkSync(DEFAULT_SERVER_SOCKET_PATH);
+  const socketServer = http.createServer();
+  const socketWss = new WebSocketServer({ server: socketServer });
+  socketWss.on('connection', handleConnection);
+  socketServer.listen(DEFAULT_SERVER_SOCKET_PATH, () => {
+    fs.chmodSync(DEFAULT_SERVER_SOCKET_PATH, 0o600);
+    console.log(`[SWAP] Server listening on unix://${DEFAULT_SERVER_SOCKET_PATH}`);
+  });
+} catch (err) {
+  console.warn(`[SWAP] Unix socket unavailable, using TCP only: ${err instanceof Error ? err.message : String(err)}`);
+}
+
+wss.on('connection', handleConnection);
+
+function handleConnection(ws: WebSocket) {
   const connectionId = uuid();
   let registeredId: string | null = null;
+  let clientKind: 'mcp' | 'hook' = 'mcp';
 
   const registrationTimer = setTimeout(() => {
     if (!registeredId) {
@@ -59,18 +78,25 @@ wss.on('connection', (ws) => {
     if (msg.type === 'REGISTER') {
       clearTimeout(registrationTimer);
       const p = msg.payload as RegisterPayload;
-      const agentId = uuid();
+      const agentId = p.agentId || uuid();
       registeredId = agentId;
+      clientKind = p.clientKind ?? 'mcp';
 
-      registry.add({ id: agentId, ws, worktreePath: p.worktreePath, taskDescription: p.taskDescription,
-        status: 'idle', connectedAt: Date.now(), lastHeartbeat: Date.now(), claims: [], recentDiffs: [] });
+      const reconnecting = registry.has(agentId);
+      if (reconnecting) {
+        registry.updateConnection(agentId, ws);
+      } else {
+        registry.add({ id: agentId, ws, clientKind, worktreePath: p.worktreePath, taskDescription: p.taskDescription,
+          status: 'idle', connectedAt: Date.now(), lastHeartbeat: Date.now(),
+          claims: intentReg.getClaims(agentId), recentDiffs: [] });
+      }
       intentReg.registerAgent(agentId, p.taskDescription);
 
       router.send(agentId, { id: uuid(), type: 'REGISTERED', payload: { agentId } });
-      router.broadcast({ id: uuid(), type: 'AGENT_JOINED',
+      router.broadcast({ id: uuid(), type: reconnecting ? 'AGENT_RECONNECTED' : 'AGENT_JOINED',
         payload: { agentId, taskDescription: p.taskDescription, worktreePath: p.worktreePath } }, agentId);
 
-      console.log(`[SWAP] Agent registered: ${agentId} — "${p.taskDescription}"`);
+      console.log(`[SWAP] Agent ${reconnecting ? 'reconnected' : 'registered'}: ${agentId} — "${p.taskDescription}"`);
       return;
     }
 
@@ -119,10 +145,20 @@ wss.on('connection', (ws) => {
 
       if (result.granted) {
         registry.addClaim(registeredId, result.claim);
-        console.log(`[SWAP] CLAIM GRANTED: ${registeredId.slice(0,8)} → ${p.symbolName} (${p.intent})`);
+        console.log(`[SWAP] CLAIM GRANTED${p.source === 'hook' ? ' [hook]' : ''}: ${registeredId.slice(0,8)} → ${p.symbolName} (${p.intent})`);
         router.send(registeredId, { id: uuid(), type: 'CLAIM_GRANTED',
           payload: { filePath: p.filePath, symbolName: p.symbolName, claimId: result.claim.key } });
       } else {
+        if (p.source === 'hook') {
+          const suggestion = getAlternativeSuggestion(p.filePath, p.symbolName, claimerId);
+          console.log(`[SWAP] CLAIM CONFLICT [hook]: ${registeredId.slice(0,8)} on ${p.symbolName}`);
+          router.send(registeredId, { id: uuid(), type: 'CLAIM_CONFLICT',
+            payload: { filePath: p.filePath, symbolName: p.symbolName,
+              heldBy: result.conflict.heldBy, heldByTask: result.conflict.heldByTask,
+              intent: result.conflict.intent, suggestion } });
+          return;
+        }
+
         // Trigger negotiation instead of flat rejection
         const holderAgent = registry.get(result.conflict.heldBy);
         const requesterAgent = registry.get(registeredId);
@@ -249,6 +285,10 @@ wss.on('connection', (ws) => {
   ws.on('close', () => {
     if (!registeredId) return;
     console.log(`[SWAP] Agent disconnected: ${registeredId.slice(0,8)}`);
+    if (clientKind === 'hook') {
+      registry.updateStatus(registeredId, 'disconnected');
+      return;
+    }
     const released = intentReg.releaseAll(registeredId);
     intentReg.unregisterAgent(registeredId);
     registry.remove(registeredId);
@@ -261,7 +301,7 @@ wss.on('connection', (ws) => {
   ws.on('error', (err) => {
     console.error(`[SWAP] WS error for ${registeredId?.slice(0,8) ?? connectionId}:`, err.message);
   });
-});
+}
 
 function getAlternativeSuggestion(filePath: string, conflictSymbol: string, forAgentId: string): string {
   const allClaims = intentReg.getAllClaims();

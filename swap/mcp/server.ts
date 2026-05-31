@@ -16,6 +16,7 @@ import {
 
 // ── Config from environment ──────────────────────────────────────────────────
 const SWAP_SERVER_URL = process.env.SWAP_SERVER_URL ?? `ws://localhost:${SERVER_PORT}`;
+const AGENT_ID = process.env.SWAP_AGENT_ID;
 const AGENT_TASK = process.env.SWAP_AGENT_TASK ?? 'Unnamed task';
 const AGENT_WORKTREE = process.env.SWAP_WORKTREE_PATH ?? process.cwd();
 
@@ -36,7 +37,7 @@ function connect() {
     ws.send(encode({
       id: uuid(),
       type: 'REGISTER',
-      payload: { worktreePath: AGENT_WORKTREE, taskDescription: AGENT_TASK },
+      payload: { worktreePath: AGENT_WORKTREE, taskDescription: AGENT_TASK, agentId: AGENT_ID, clientKind: 'mcp' },
     }));
   });
 

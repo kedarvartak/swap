@@ -3,11 +3,16 @@
   "version": "0.1.0",
   "description": "Semantic Workspace Awareness Protocol — real-time coordination layer for parallel AI coding agents",
   "type": "module",
+  "bin": {
+    "swap": "./dist/cli.js",
+    "swap-hook": "./dist/hooks/cli.js"
+  },
   "scripts": {
     "build": "tsc",
     "server": "node --loader ts-node/esm server/index.ts",
     "mcp": "node --loader ts-node/esm mcp/server.ts",
-    "test:phase1": "bash scripts/test-phase1.sh"
+    "test:phase1": "bash scripts/test-phase1.sh",
+    "test:phaseA": "bash scripts/test-phaseA.sh"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",

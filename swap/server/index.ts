@@ -255,14 +255,15 @@ function handleConnection(ws: WebSocket) {
       const released = intentReg.release(registeredId, p.filePath, p.symbolName);
       registry.removeClaim(registeredId, p.filePath, p.symbolName);
 
-      // Semantic diff + graph update if source provided
-      if (p.newSource && released) {
-        const { symbols, edges } = extractFull(p.newSource, p.filePath);
+      // Semantic diff + graph update if source provided.
+      // Run even when this agent didn't own the claim (advisory-mode override):
+      // the edit landed on disk, so peers must still see the diff.
+      if (p.newSource) {
+        const { edges } = extractFull(p.newSource, p.filePath);
         graph.updateFromEdges(edges);
 
         const diff = snapshots.diff(p.filePath, p.newSource, registeredId);
         if (diff.changes.length > 0) {
-          // Attach affected symbols from graph
           for (const change of diff.changes) {
             const key = `${p.filePath}::${change.symbolName}`;
             change.affectedSymbols = Array.from(graph.getTransitiveDependents(key)).slice(0, 10);
@@ -270,7 +271,8 @@ function handleConnection(ws: WebSocket) {
 
           registry.addDiff(registeredId, diff);
           router.broadcast({ id: uuid(), type: 'PEER_DIFF', payload: diff }, registeredId);
-          console.log(`[SWAP] DIFF: ${diff.changes.length} change(s) in ${p.filePath} (${diff.stats.breaking} breaking)`);
+          const tag = released ? '' : ' [advisory override]';
+          console.log(`[SWAP] DIFF${tag}: ${diff.changes.length} change(s) in ${p.filePath} (${diff.stats.breaking} breaking)`);
         }
       }
 

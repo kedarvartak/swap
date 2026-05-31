@@ -91,6 +91,68 @@ export interface DependencyEdge {
   kind: EdgeKind;
 }
 
+export interface ImpactGraphNode {
+  id: SymbolKey;
+  filePath: string;
+  symbolName: string;
+  symbolKind: SymbolKind;
+  dependents: number;
+  claimedBy?: string;
+  intent?: ClaimIntent;
+  recentlyChanged?: boolean;
+  breakingImpact?: boolean;
+}
+
+export interface ImpactGraphEdge extends DependencyEdge {
+  unresolved?: boolean;
+}
+
+export interface ImpactGraph {
+  nodes: ImpactGraphNode[];
+  edges: ImpactGraphEdge[];
+  simulated: boolean;
+}
+
+export type AuditAction =
+  | 'claim'
+  | 'release'
+  | 'negotiate'
+  | 'diff'
+  | 'policy_decision'
+  | 'approval';
+
+export interface AuditEvent {
+  id: string;
+  timestamp: number;
+  actor: string;
+  actorTask: string;
+  action: AuditAction;
+  target: string;
+  outcome: 'granted' | 'blocked' | 'recorded' | 'approved' | 'rejected' | 'deferred';
+  summary: string;
+}
+
+export interface PolicyRule {
+  id: string;
+  pattern: string;
+  mode: 'strict' | 'advisory';
+  requireApprovalOnBreaking: boolean;
+  description: string;
+}
+
+export interface Approval {
+  id: string;
+  requestedAt: number;
+  agentShortId: string;
+  taskDescription: string;
+  filePath: string;
+  symbolName: string;
+  beforeSignature: string;
+  afterSignature: string;
+  blastRadius: number;
+  status: 'pending' | 'approved' | 'rejected';
+}
+
 export interface DashboardState {
   agents: AgentRecord[];
   claims: SymbolClaim[];
@@ -98,5 +160,11 @@ export interface DashboardState {
   diffs: SemanticDiff[];
   log: LogEvent[];
   edges: DependencyEdge[];
+  impactGraph: ImpactGraph;
+  auditEvents: AuditEvent[];
+  policyRules: PolicyRule[];
+  approvals: Approval[];
+  claimLatencySamples: number[];
+  throughputPerMinute: number;
   tick: number;
 }

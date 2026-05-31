@@ -91,6 +91,7 @@ function mapClaim(c: ServerClaim): SymbolClaim {
 // ─── State helpers ────────────────────────────────────────────────────────────
 
 function emptyLiveState(): DashboardState {
+  const seed = buildInitialState();
   return {
     agents: [],
     claims: [],
@@ -98,6 +99,12 @@ function emptyLiveState(): DashboardState {
     diffs: [],
     log: [],
     edges: [],
+    impactGraph: seed.impactGraph,
+    auditEvents: seed.auditEvents,
+    policyRules: seed.policyRules,
+    approvals: seed.approvals,
+    claimLatencySamples: [],
+    throughputPerMinute: 0,
     tick: 0,
   };
 }

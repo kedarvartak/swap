@@ -1,6 +1,7 @@
 import type {
   AgentRecord, SymbolClaim, NegotiationRecord,
   SemanticDiff, LogEvent, DependencyEdge, DashboardState,
+  ImpactGraph, AuditEvent, PolicyRule, Approval,
 } from '../types/swap';
 
 const now = Date.now();
@@ -203,6 +204,69 @@ export const initialEdges: DependencyEdge[] = [
   { from: 'src/inventory/schema.ts::InventoryItem', to: 'src/shared/types.ts::ApiResponse', kind: 'type-use' },
 ];
 
+export const initialImpactGraph: ImpactGraph = {
+  simulated: true,
+  nodes: [
+    {
+      id: 'src/auth/middleware.ts::validateSession',
+      filePath: 'src/auth/middleware.ts',
+      symbolName: 'validateSession',
+      symbolKind: 'function',
+      dependents: 7,
+      claimedBy: 'a1b2',
+      intent: 'refactor',
+      breakingImpact: true,
+    },
+    {
+      id: 'src/auth/middleware.ts::SessionStore',
+      filePath: 'src/auth/middleware.ts',
+      symbolName: 'SessionStore',
+      symbolKind: 'class',
+      dependents: 4,
+      claimedBy: 'a1b2',
+      intent: 'write',
+    },
+    {
+      id: 'src/payment/processor.ts::processPayment',
+      filePath: 'src/payment/processor.ts',
+      symbolName: 'processPayment',
+      symbolKind: 'function',
+      dependents: 9,
+      claimedBy: 'e5f6',
+      intent: 'write',
+    },
+    {
+      id: 'src/payment/processor.ts::validateCard',
+      filePath: 'src/payment/processor.ts',
+      symbolName: 'validateCard',
+      symbolKind: 'function',
+      dependents: 5,
+      recentlyChanged: true,
+      breakingImpact: true,
+    },
+    {
+      id: 'src/shared/types.ts::ApiResponse',
+      filePath: 'src/shared/types.ts',
+      symbolName: 'ApiResponse',
+      symbolKind: 'interface',
+      dependents: 12,
+      claimedBy: 'i9j0',
+      intent: 'read',
+    },
+    {
+      id: 'src/inventory/schema.ts::InventoryItem',
+      filePath: 'src/inventory/schema.ts',
+      symbolName: 'InventoryItem',
+      symbolKind: 'interface',
+      dependents: 2,
+    },
+  ],
+  edges: [
+    ...initialEdges,
+    { from: 'src/auth/middleware.ts::validateSession', to: 'src/payment/processor.ts::processPayment', kind: 'call', unresolved: true },
+  ],
+};
+
 export const initialLog: LogEvent[] = [
   { id: 'l1', timestamp: now - 480000, type: 'AGENT_JOIN',  agentShortId: 'm3n4', message: 'agent m3n4 connected — "Update inventory management schema migration"' },
   { id: 'l2', timestamp: now - 300000, type: 'CONFLICT',    agentShortId: 'e5f6', message: 'conflict on src/payment/processor.ts::PaymentConfig (e5f6 vs m3n4)' },
@@ -215,6 +279,100 @@ export const initialLog: LogEvent[] = [
   { id: 'l9', timestamp: now - 3000,   type: 'NEGOTIATE',   agentShortId: undefined, message: 'negotiation session neg-xx99yy00 started — awaiting responses...' },
 ];
 
+export const initialAuditEvents: AuditEvent[] = [
+  {
+    id: 'audit-001',
+    timestamp: now - 240000,
+    actor: 'e5f6',
+    actorTask: 'Add payment processing validation logic',
+    action: 'diff',
+    target: 'src/payment/processor.ts::validateCard',
+    outcome: 'recorded',
+    summary: 'Released signature change with 5 downstream dependents',
+  },
+  {
+    id: 'audit-002',
+    timestamp: now - 176000,
+    actor: 'e5f6',
+    actorTask: 'Add payment processing validation logic',
+    action: 'negotiate',
+    target: 'src/shared/types.ts::ApiResponse',
+    outcome: 'granted',
+    summary: 'Won negotiation by priority score',
+  },
+  {
+    id: 'audit-003',
+    timestamp: now - 90000,
+    actor: 'a1b2',
+    actorTask: 'Refactor auth middleware + session handling',
+    action: 'claim',
+    target: 'src/auth/middleware.ts::validateSession',
+    outcome: 'granted',
+    summary: 'Hook auto-claimed symbol before edit',
+  },
+  {
+    id: 'audit-004',
+    timestamp: now - 3000,
+    actor: 'e5f6',
+    actorTask: 'Add payment processing validation logic',
+    action: 'negotiate',
+    target: 'src/auth/middleware.ts::validateSession',
+    outcome: 'deferred',
+    summary: 'Active conflict, awaiting priority responses',
+  },
+];
+
+export const initialPolicyRules: PolicyRule[] = [
+  {
+    id: 'policy-001',
+    pattern: 'src/payment/**',
+    mode: 'strict',
+    requireApprovalOnBreaking: true,
+    description: 'Payments code blocks on conflicts and requires approval for breaking changes.',
+  },
+  {
+    id: 'policy-002',
+    pattern: 'src/auth/**',
+    mode: 'strict',
+    requireApprovalOnBreaking: true,
+    description: 'Authentication is security-sensitive.',
+  },
+  {
+    id: 'policy-003',
+    pattern: 'src/docs/**',
+    mode: 'advisory',
+    requireApprovalOnBreaking: false,
+    description: 'Docs edits warn on conflicts but do not block.',
+  },
+];
+
+export const initialApprovals: Approval[] = [
+  {
+    id: 'approval-001',
+    requestedAt: now - 110000,
+    agentShortId: 'e5f6',
+    taskDescription: 'Add payment processing validation logic',
+    filePath: 'src/payment/processor.ts',
+    symbolName: 'validateCard',
+    beforeSignature: '(card: Card): boolean',
+    afterSignature: '(card: Card, cvv: string): boolean',
+    blastRadius: 5,
+    status: 'pending',
+  },
+  {
+    id: 'approval-002',
+    requestedAt: now - 360000,
+    agentShortId: 'a1b2',
+    taskDescription: 'Refactor auth middleware + session handling',
+    filePath: 'src/auth/middleware.ts',
+    symbolName: 'validateSession',
+    beforeSignature: '(token: string): Session',
+    afterSignature: '(token: string, options?: ValidateOptions): Session',
+    blastRadius: 7,
+    status: 'approved',
+  },
+];
+
 export function buildInitialState(): DashboardState {
   return {
     agents: initialAgents,
@@ -223,6 +381,12 @@ export function buildInitialState(): DashboardState {
     diffs: initialDiffs,
     log: initialLog,
     edges: initialEdges,
+    impactGraph: initialImpactGraph,
+    auditEvents: initialAuditEvents,
+    policyRules: initialPolicyRules,
+    approvals: initialApprovals,
+    claimLatencySamples: [11, 13, 16, 12, 18, 14, 10],
+    throughputPerMinute: 2.6,
     tick: 0,
   };
 }

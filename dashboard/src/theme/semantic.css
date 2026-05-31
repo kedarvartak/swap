@@ -1,0 +1,151 @@
+@import './primitives.css';
+
+:root {
+  color-scheme: dark;
+  --density: 1;
+  --surface-base: #0f1218;
+  --surface-raised: #171b23;
+  --surface-overlay: #1f2530;
+  --surface-sunken: #0a0d12;
+  --surface-hover: #202633;
+  --surface-selected: color-mix(in srgb, var(--color-accent) 16%, transparent);
+  --content-primary: #f4f7fb;
+  --content-secondary: #b8c2d1;
+  --content-tertiary: #7b8797;
+  --content-inverse: #ffffff;
+  --border-subtle: #273142;
+  --border-strong: #3a4658;
+  --focus-ring: #818cf8;
+  --color-accent: var(--indigo-400);
+  --color-accent-hover: var(--indigo-300);
+  --color-accent-muted: rgba(129, 140, 248, 0.16);
+  --intent-read: var(--teal-400);
+  --intent-write: var(--amber-400);
+  --intent-refactor: var(--violet-400);
+  --intent-delete: var(--red-400);
+  --change-added: var(--green-400);
+  --change-modified: var(--blue-400);
+  --change-breaking: var(--orange-400);
+  --change-renamed: var(--violet-400);
+  --status-active: var(--green-400);
+  --status-idle: var(--content-tertiary);
+  --status-waiting: var(--amber-400);
+  --status-done: var(--teal-400);
+  --status-disconnected: var(--red-400);
+  --sev-info: var(--blue-400);
+  --sev-success: var(--green-400);
+  --sev-warning: var(--amber-400);
+  --sev-danger: var(--red-400);
+  --shadow-overlay: 0 20px 60px rgba(0, 0, 0, 0.34);
+}
+
+:root[data-theme='daylight'] {
+  color-scheme: light;
+  --surface-base: #f6f7fb;
+  --surface-raised: #ffffff;
+  --surface-overlay: #ffffff;
+  --surface-sunken: #eef1f7;
+  --surface-hover: #f0f3fa;
+  --content-primary: #111827;
+  --content-secondary: #475569;
+  --content-tertiary: #64748b;
+  --content-inverse: #ffffff;
+  --border-subtle: #d8deea;
+  --border-strong: #b8c1d1;
+  --focus-ring: var(--indigo-600);
+  --color-accent: var(--indigo-600);
+  --color-accent-hover: var(--indigo-700);
+  --color-accent-muted: rgba(79, 70, 229, 0.12);
+  --intent-read: var(--teal-700);
+  --intent-write: var(--amber-700);
+  --intent-refactor: var(--violet-700);
+  --intent-delete: var(--red-700);
+  --change-added: var(--green-700);
+  --change-modified: var(--blue-700);
+  --change-breaking: var(--orange-700);
+  --change-renamed: var(--violet-700);
+  --status-active: var(--green-700);
+  --status-idle: var(--neutral-500);
+  --status-waiting: var(--amber-700);
+  --status-done: var(--teal-700);
+  --status-disconnected: var(--red-700);
+  --shadow-overlay: 0 20px 60px rgba(31, 41, 55, 0.16);
+}
+
+:root[data-theme='contrast'] {
+  color-scheme: dark;
+  --surface-base: #000000;
+  --surface-raised: #101010;
+  --surface-overlay: #181818;
+  --surface-sunken: #050505;
+  --surface-hover: #202020;
+  --content-primary: #ffffff;
+  --content-secondary: #e5e7eb;
+  --content-tertiary: #cbd5e1;
+  --content-inverse: #000000;
+  --border-subtle: #6b7280;
+  --border-strong: #e5e7eb;
+  --focus-ring: #facc15;
+  --color-accent: #facc15;
+  --color-accent-hover: #fde047;
+  --color-accent-muted: rgba(250, 204, 21, 0.22);
+}
+
+:root[data-density='compact'] {
+  --density: 0.78;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--surface-base);
+  color: var(--content-primary);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  letter-spacing: 0;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button {
+  color: inherit;
+}
+
+code,
+pre,
+.mono {
+  font-family: var(--font-mono);
+}
+
+button:focus-visible,
+select:focus-visible,
+input:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.001ms !important;
+  }
+}

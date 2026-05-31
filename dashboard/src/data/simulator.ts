@@ -73,7 +73,12 @@ function appendLogMessage(state: DashboardState): DashboardState {
 
 export function tick(state: DashboardState): DashboardState {
   const t = state.tick;
-  let next = { ...state, tick: t + 1 };
+  let next = {
+    ...state,
+    tick: t + 1,
+    claimLatencySamples: [...state.claimLatencySamples.slice(-20), 9 + Math.floor(Math.random() * 12)],
+    throughputPerMinute: Math.max(0.4, state.throughputPerMinute + (Math.random() - 0.5) * 0.3),
+  };
 
   next = tickHeartbeats(next);
 

@@ -70,12 +70,15 @@ export class AgentRegistry {
     }
   }
 
-  // Removes agents that haven't sent a heartbeat in HEARTBEAT_TIMEOUT_MS
-  // Returns IDs of removed agents
+  // Removes agents that haven't sent a heartbeat in HEARTBEAT_TIMEOUT_MS.
+  // Hook agents never send heartbeats — their claims are governed by CLAIM_TTL,
+  // so they are excluded here to prevent premature claim release mid-edit.
+  // Returns IDs of removed agents.
   pruneStale(): string[] {
     const now = Date.now();
     const stale: string[] = [];
     for (const [id, agent] of this.agents) {
+      if (agent.clientKind === 'hook') continue;
       if (now - agent.lastHeartbeat > HEARTBEAT_TIMEOUT_MS) {
         stale.push(id);
         this.agents.delete(id);
